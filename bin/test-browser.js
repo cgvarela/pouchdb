@@ -1,24 +1,26 @@
 #!/usr/bin/env node
 'use strict';
 
-var path = require('path');
-var spawn = require('child_process').spawn;
-
 var wd = require('wd');
 wd.configureHttp({timeout: 180000}); // 3 minutes
+
 var sauceConnectLauncher = require('sauce-connect-launcher');
+var selenium = require('selenium-standalone');
 var querystring = require("querystring");
 var request = require('request').defaults({json: true});
 
 var devserver = require('./dev-server.js');
 
-var SELENIUM_PATH = '../vendor/selenium-server-standalone-2.38.0.jar';
-var SELENIUM_HUB = 'http://localhost:4444/wd/hub/status';
-
 var testTimeout = 30 * 60 * 1000;
 
 var username = process.env.SAUCE_USERNAME;
 var accessKey = process.env.SAUCE_ACCESS_KEY;
+
+var SELENIUM_VERSION = process.env.SELENIUM_VERSION || '3.7.1';
+var FIREFOX_BIN = process.env.FIREFOX_BIN;
+
+// BAIL=0 to disable bailing
+var bail = process.env.BAIL !== '0';
 
 // process.env.CLIENT is a colon seperated list of
 // (saucelabs|selenium):browserName:browserVerion:platform
@@ -31,8 +33,19 @@ var client = {
 };
 
 var testRoot = 'http://127.0.0.1:8000/tests/';
-var testUrl = testRoot +
-  (process.env.PERF ? 'performance/test.html' : 'test.html');
+var testUrl;
+if (process.env.PERF) {
+  testUrl = testRoot + 'performance/index.html';
+} else if (process.env.TYPE === 'fuzzy') {
+  testUrl = testRoot + 'fuzzy/index.html';
+} else if (process.env.TYPE === 'mapreduce') {
+  testUrl = testRoot + 'mapreduce/index.html';
+} else if (process.env.TYPE === 'find') {
+  testUrl = testRoot + 'find/index.html';
+} else {
+  testUrl = testRoot + 'integration/index.html';
+}
+
 var qs = {};
 
 var sauceClient;
@@ -42,28 +55,45 @@ var tunnelId = process.env.TRAVIS_JOB_NUMBER || 'tunnel-' + Date.now();
 if (client.runner === 'saucelabs') {
   qs.saucelabs = true;
 }
+if (process.env.INVERT) {
+  qs.invert = process.env.INVERT;
+}
 if (process.env.GREP) {
   qs.grep = process.env.GREP;
 }
 if (process.env.ADAPTERS) {
   qs.adapters = process.env.ADAPTERS;
 }
-if (process.env.ES5_SHIM || process.env.ES5_SHIMS) {
-  qs.es5shim = true;
-}
 if (process.env.AUTO_COMPACTION) {
   qs.autoCompaction = true;
 }
+if (process.env.SERVER) {
+  qs.SERVER = process.env.SERVER;
+}
+if (process.env.SKIP_MIGRATION) {
+  qs.SKIP_MIGRATION = process.env.SKIP_MIGRATION;
+}
+if (process.env.POUCHDB_SRC) {
+  qs.src = process.env.POUCHDB_SRC;
+}
+if (process.env.PLUGINS) {
+  qs.plugins = process.env.PLUGINS;
+}
+if (process.env.COUCH_HOST) {
+  qs.couchHost = process.env.COUCH_HOST;
+}
+if (process.env.ADAPTER) {
+  qs.adapter = process.env.ADAPTER;
+}
+if (process.env.ITERATIONS) {
+  qs.iterations = process.env.ITERATIONS;
+}
+if (process.env.NEXT) {
+  qs.NEXT = '1';
+}
+
 testUrl += '?';
 testUrl += querystring.stringify(qs);
-
-if (process.env.TRAVIS &&
-    client.browser !== 'firefox' &&
-    process.env.TRAVIS_SECURE_ENV_VARS === 'false') {
-  console.error('Not running test, cannot connect to saucelabs');
-  process.exit(0);
-  return;
-}
 
 function testError(e) {
   console.error(e);
@@ -88,7 +118,7 @@ function postResult(result) {
         method: 'POST',
         uri: process.env.DASHBOARD_HOST + '/performance_results',
         json: result
-      }, function (error, response, body) {
+      }, function (error) {
         console.log(result);
         process.exit(!!error);
       });
@@ -99,7 +129,7 @@ function postResult(result) {
 }
 
 function testComplete(result) {
-  console.log(result);
+  console.log('=>', JSON.stringify(result, null, '  '), '<=');
 
   sauceClient.quit().then(function () {
     if (sauceConnectProcess) {
@@ -113,31 +143,18 @@ function testComplete(result) {
 }
 
 function startSelenium(callback) {
-
   // Start selenium
-  spawn('java', ['-jar', path.resolve(__dirname, SELENIUM_PATH)], {});
-
-  var retries = 0;
-  var started = function () {
-
-    if (++retries > 30) {
-      console.error('Unable to connect to selenium');
+  var opts = {version: SELENIUM_VERSION};
+  selenium.install(opts, function (err) {
+    if (err) {
+      console.error('Failed to install selenium');
       process.exit(1);
-      return;
     }
-
-    request(SELENIUM_HUB, function (err, resp) {
-      if (resp && resp.statusCode === 200) {
-        sauceClient = wd.promiseChainRemote();
-        callback();
-      } else {
-        setTimeout(started, 1000);
-      }
+    selenium.start(opts, function () {
+      sauceClient = wd.promiseChainRemote();
+      callback();
     });
-  };
-
-  started();
-
+  });
 }
 
 function startSauceConnect(callback) {
@@ -162,7 +179,7 @@ function startSauceConnect(callback) {
 
 function startTest() {
 
-  console.log('Starting', client);
+  console.log('Starting', client, 'on', testUrl);
 
   var opts = {
     browserName: client.browser,
@@ -170,11 +187,14 @@ function startTest() {
     platform: client.platform,
     tunnelTimeout: testTimeout,
     name: client.browser + ' - ' + tunnelId,
-    'max-duration': 60 * 30,
+    'max-duration': 60 * 45,
     'command-timeout': 599,
     'idle-timeout': 599,
     'tunnel-identifier': tunnelId
   };
+  if (FIREFOX_BIN) {
+    opts.firefox_binary = FIREFOX_BIN;
+  }
 
   sauceClient.init(opts).get(testUrl, function () {
 
@@ -184,11 +204,11 @@ function startTest() {
         if (err) {
           clearInterval(interval);
           testError(err);
-        } else if (results.completed || results.failures.length) {
+        } else if (results.completed || (results.failures.length && bail)) {
           clearInterval(interval);
           testComplete(results);
         } else {
-          console.log('=> ', results);
+          console.log(results);
         }
       });
     }, 10 * 1000);

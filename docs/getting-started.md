@@ -4,13 +4,21 @@ title: Getting Started Guide
 sidebar: nav.html
 ---
 
+{% include alert/start.html variant="info" %}
+
+If you get stuck, download a <a href="https://github.com/nickcolley/getting-started-todo/archive/master.zip" target="_blank">working version</a>,
+or check out the <a href="https://github.com/nickcolley/getting-started-todo" target="_blank">full repo</a>
+and <a href="https://github.com/nickcolley/getting-started-todo/commits/master" target="_blank">commit history</a>.
+
+{% include alert/end.html %}
+
 In this tutorial we will write a basic Todo web application based on [TodoMVC](http://todomvc.com/) that syncs to an online CouchDB server. It should take around 10 minutes.
 
 {% include anchor.html class="h3" title="Video Tutorial" hash="video_tutorial" %}
 
-If you get stuck or just prefer video tutorials, this guide is available in video format:
+Prefer video tutorials? This guide is available in video format:
 
-<iframe width="560" height="315" src="//www.youtube.com/embed/-Z7UF2TuSp0" frameborder="0" allowfullscreen></iframe>
+{% include iframe.html src="//www.youtube.com/embed/-Z7UF2TuSp0" %}
 
 {% include anchor.html class="h3" title="Download Assets" hash="download" %}
 
@@ -18,14 +26,13 @@ We will start with a template of the project where all the data related function
 
 {% highlight bash %}
 $ cd pouchdb-getting-started-todo
-$ python -m SimpleHTTPServer
+$ python -m SimpleHTTPServer  # for Python 2
+$ python -m http.server       # for Python 3
 {% endhighlight %}
 
 Then visit [http://127.0.0.1:8000/](http://127.0.0.1:8000/). If you see the following screenshot, you are good to go:
 
-<a href="{{ site.baseurl }}/static/img/screenshots/todo-1.png" style="display: block; text-align: center;">
-   <img src="{{ site.baseurl }}/static/img/screenshots/todo-1.png" style="width:400px;"/>
-</a>
+{% include img.html src="screenshots/todo-1.png" alt="Todo Screenshot" %}
 
 It's also a good idea to open your browser's console so you can see any errors or confirmation messages.
 
@@ -34,7 +41,7 @@ It's also a good idea to open your browser's console so you can see any errors o
 Open `index.html` and include PouchDB in the app by adding a script tag:
 
 {% highlight html %}
-<script src="//cdn.jsdelivr.net/pouchdb/{{site.version}}/pouchdb.min.js"></script>
+<script src="//cdn.jsdelivr.net/npm/pouchdb@{{site.version}}/dist/pouchdb.min.js"></script>
 <script src="js/base.js"></script>
 <script src="js/app.js"></script>
 {% endhighlight %}
@@ -98,12 +105,10 @@ We dont want to refresh the page to see new items. More typically you would upda
 {% highlight js %}
 var remoteCouch = false;
 
-db.info(function(err, info) {
-  db.changes({
-    since: info.update_seq,
-    live: true
-  }).on('change', showTodos);
-});
+db.changes({
+  since: 'now',
+  live: true
+}).on('change', showTodos);
 
 // We have to create a new todo document and enter it in the database
 function addTodo(text) {
@@ -122,7 +127,7 @@ function checkboxChanged(todo, event) {
 }
 {% endhighlight %}
 
-This is similiar to creating a document, however the document must also contain a `_rev` field (in addition to `_id`), otherwise the write will be rejected. This ensures that you dont accidently overwrite changes to a document.
+This is similar to creating a document, however the document must also contain a `_rev` field (in addition to `_id`), otherwise the write will be rejected. This ensures that you dont accidently overwrite changes to a document.
 
 You can test that this works by checking a todo item and refreshing the page. It should stay checked.
 
@@ -156,11 +161,11 @@ function todoBlurred(todo, event) {
 
 {% include anchor.html class="h3" title="Installing CouchDB" hash="installing_couchdb" %}
 
-Now we'll implement the syncing. You need to have a CouchDB instance, which you can either install yourself [CouchDB(1.3+) locally](http://couchdb.apache.org/) or use with an online provider like [IrisCouch](http://iriscouch.com).
+Now we'll implement the syncing. You need to have a compatible server instance. You can install either [PouchDB-Server](https://github.com/pouchdb/pouchdb-server), [CouchDB](http://couchdb.apache.org/) or use an hosted Couch service such as [Cloudant](https://cloudant.com/)
 
 {% include anchor.html class="h3" title="Enabling CORS" hash="enabling_cors" %}
 
-To replicate directly with CouchDB, you need to make sure CORS is enabled. Only set the username and password if you have set them previously. By default, CouchDB will be installed in "Admin Party," where username and password are not needed. You will need to replace `myname.iriscouch.com` with your own host (`127.0.0.1:5984` if installed locally):
+To replicate directly with CouchDB, you need to make sure CORS is enabled. Only set the username and password if you have set them previously. By default, CouchDB will be installed in "Admin Party," where username and password are not needed. You will need to replace `myname.example.com` with your own host (`127.0.0.1:5984` if installed locally):
 
 You can enable CORS in CouchDB using `curl` or the Futon web interface, but we've saved you some time by making a Node script called [add-cors-to-couchdb](https://github.com/pouchdb/add-cors-to-couchdb). Just run:
 
@@ -172,22 +177,22 @@ $ add-cors-to-couchdb
 Or if your database is not at `127.0.0.1:5984`:
 
 {% highlight bash %}
-$ add-cors-to-couchdb http://me.iriscouch.com -u myusername -p mypassword
+$ add-cors-to-couchdb http://me.example.com -u myusername -p mypassword
 {% endhighlight %}
 
 You can check that CORS is now enabled by visiting [http://localhost:5984/_utils/config.html](http://localhost:5984/_utils/config.html) in your browser. You should see something like this:
 
-![CORS settings in CouchDB](static/img/cors_in_couchdb.png)
+{% include img.html src="cors_in_couchdb.png" alt="CORS settings in CouchDB" %}
 
 {% include anchor.html class="h3" title="Implement basic two way sync" hash="basic_two_way_sync" %}
 
-Now we will have the todo list sync. Back in `app.js` we need to specify the address of the remote database. Remember to replace `user`, `pass` and `myname.iriscouch.com` with the credentials of your own CouchDB instance:
+Now we will have the todo list sync. Back in `app.js` we need to specify the address of the remote database. Remember to replace `user`, `pass` and `myname.example.com` with the credentials of your own CouchDB instance:
 
 {% highlight js %}
 // EDITING STARTS HERE (you dont need to edit anything above this line)
 
 var db = new PouchDB('todos');
-var remoteCouch = 'http://user:pass@mname.iriscouch.com/todos';
+var remoteCouch = 'http://user:pass@mname.example.com/todos';
 {% endhighlight %}
 
 Then we can implement the sync function like so:

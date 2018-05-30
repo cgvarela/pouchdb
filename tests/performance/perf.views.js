@@ -1,10 +1,7 @@
 'use strict';
 
-module.exports = function (PouchDB, opts) {
+module.exports = function (PouchDB, opts, callback) {
 
-  // need to use bluebird for promises everywhere, so we're comparing
-  // apples to apples
-  var Promise = require('bluebird');
   var utils = require('./utils');
 
   function makeTestDocs() {
@@ -28,7 +25,7 @@ module.exports = function (PouchDB, opts) {
     {
       name: 'temp-views',
       assertions: 1,
-      iterations: 10,
+      iterations: 1,
       setup: function (db, callback) {
         var tasks = [];
         for (var i = 0; i < 100; i++) {
@@ -52,7 +49,37 @@ module.exports = function (PouchDB, opts) {
           return db.query(function (doc) {
             emit(doc.key);
           }, task);
-        })).then(function (res) {
+        })).then(function () {
+          done();
+        }, done);
+      }
+    },
+    {
+      name: 'build-secondary-index',
+      assertions: 1,
+      iterations: 1,
+      setup: function (db, callback) {
+        var docs = [];
+        for (var i = 0; i < 1000; i++) {
+          docs.push({});
+        }
+        db.bulkDocs(docs).then(function () {
+          return db.put({
+            _id : '_design/myview',
+            views : {
+              myview : {
+                map : function (doc) {
+                  emit(doc._id);
+                }.toString()
+              }
+            }
+          });
+        }).then(function () {
+          callback();
+        }, callback);
+      },
+      test: function (db, itr, doc, done) {
+        db.query('myview/myview', {limit: 0}).then(function () {
           done();
         }, done);
       }
@@ -95,7 +122,7 @@ module.exports = function (PouchDB, opts) {
         ];
         Promise.all(tasks.map(function (task) {
             return db.query('myview/myview', task);
-          })).then(function (res) {
+          })).then(function () {
             done();
           }, done);
       }
@@ -138,13 +165,13 @@ module.exports = function (PouchDB, opts) {
         ];
         Promise.all(tasks.map(function (task) {
             return db.query('myview/myview', task);
-          })).then(function (res) {
+          })).then(function () {
             done();
           }, done);
       }
     }
   ];
 
-  utils.runTests(PouchDB, 'views', testCases, opts);
+  utils.runTests(PouchDB, 'views', testCases, opts, callback);
 
 };
